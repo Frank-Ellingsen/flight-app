@@ -835,6 +835,42 @@ h1, h2, h3, h4, h5, h6 {
   line-height: 1.5;
 }
 
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Settings Panel styling */
+.settings-panel {
+  padding: 1.5rem;
+  border-left: 4px solid var(--secondary);
+  animation: slideDown 0.3s ease-out;
+}
+
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+}
+
 /* Footer layout */
 .footer {
   text-align: center;

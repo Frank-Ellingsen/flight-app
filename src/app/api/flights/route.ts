@@ -21,7 +21,9 @@ export async function GET(request: NextRequest) {
 
   const query = rawQuery;
   const normalizedQuery = query.replace(/\s+/g, "").toUpperCase();
-  const apiKey = process.env.AVIATION_API_KEY;
+
+  // Check for custom API key in headers first, then fall back to environment variable
+  const apiKey = request.headers.get("x-api-key") || process.env.AVIATION_API_KEY;
 
   // Graceful Fallback check: If API key is missing or is a placeholder, use mock database
   if (!apiKey || apiKey === "YOUR_API_KEY_HERE" || apiKey.length < 10) {

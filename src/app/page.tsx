@@ -10,7 +10,11 @@ import {
   AlertCircle, 
   Globe, 
   Compass, 
-  Info
+  Info,
+  Settings,
+  Key,
+  Check,
+  X
 } from "lucide-react";
 import { Flight } from "@/data/mockFlights";
 
@@ -20,6 +24,39 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+  
+  // Custom API Key state - initialized directly from localStorage to avoid cascading renders
+  const [customApiKey, setCustomApiKey] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("aviation_api_key") || "";
+    }
+    return "";
+  });
+  const [showSettings, setShowSettings] = useState(false);
+  const [isKeySaved, setIsKeySaved] = useState(() => {
+    if (typeof window !== "undefined") {
+      return !!localStorage.getItem("aviation_api_key");
+    }
+    return false;
+  });
+
+  const saveApiKey = () => {
+
+    if (customApiKey.trim()) {
+      localStorage.setItem("aviation_api_key", customApiKey.trim());
+      setIsKeySaved(true);
+      setShowSettings(false);
+    } else {
+      localStorage.removeItem("aviation_api_key");
+      setIsKeySaved(false);
+    }
+  };
+
+  const clearApiKey = () => {
+    setCustomApiKey("");
+    localStorage.removeItem("aviation_api_key");
+    setIsKeySaved(false);
+  };
 
   // Perform search query
   const handleSearch = async (queryToSearch: string) => {
@@ -34,7 +71,16 @@ export default function Home() {
     setHasSearched(true);
 
     try {
-      const response = await fetch(`/api/flights?query=${encodeURIComponent(trimmed)}`);
+      const headers: Record<string, string> = {};
+      const savedKey = localStorage.getItem("aviation_api_key");
+      if (savedKey) {
+        headers["x-api-key"] = savedKey;
+      }
+
+      const response = await fetch(`/api/flights?query=${encodeURIComponent(trimmed)}`, {
+        headers: headers
+      });
+      
       if (!response.ok) {
         throw new Error("Failed to fetch flight details. Please try again.");
       }
@@ -54,6 +100,7 @@ export default function Home() {
       setLoading(false);
     }
   };
+
 
 
   const onSubmit = (e: FormEvent) => {
@@ -90,11 +137,59 @@ export default function Home() {
     <div className="app-container">
       {/* Hero Header Section */}
       <header className="hero">
+        <div style={{ position: "absolute", top: "1rem", right: "1rem" }}>
+          <button 
+            onClick={() => setShowSettings(!showSettings)} 
+            className="chip-btn"
+            style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.5rem 1rem" }}
+          >
+            <Settings size={18} />
+            <span>{isKeySaved ? "API Key Set" : "API Settings"}</span>
+            {isKeySaved && <Check size={14} style={{ color: "var(--success)" }} />}
+          </button>
+        </div>
         <Image src="/logo.png" alt="Flights-Tracker Norway Logo" width={120} height={120} className="hero-logo" />
         <p className="hero-subtitle" style={{ marginTop: "0.5rem" }}>
           Track departures, arrivals, timezones, and real-time schedules for all flights traveling to or from Norway.
         </p>
       </header>
+
+      {showSettings && (
+        <section className="glass-panel settings-panel" style={{ marginBottom: "1.5rem", animation: "slideDown 0.3s ease-out" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+            <h3 style={{ display: "flex", alignItems: "center", gap: "0.5rem", margin: 0 }}>
+              <Key size={20} />
+              Custom API Configuration
+            </h3>
+            <button onClick={() => setShowSettings(false)} className="icon-btn">
+              <X size={20} />
+            </button>
+          </div>
+          <p style={{ fontSize: "0.9rem", color: "var(--text-muted)", marginBottom: "1rem" }}>
+            If the default API key is rate-limited, you can provide your own <strong>Aviationstack</strong> API key. 
+            It will be stored locally in your browser.
+          </p>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <input 
+              type="password"
+              className="search-input"
+              placeholder="Enter Aviationstack API Key..."
+              value={customApiKey}
+              onChange={(e) => setCustomApiKey(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <button onClick={saveApiKey} className="search-btn" style={{ padding: "0 1.5rem" }}>
+              Save
+            </button>
+            {isKeySaved && (
+              <button onClick={clearApiKey} className="chip-btn" style={{ color: "var(--error)" }}>
+                Clear
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
 
       {/* Main Search Panel */}
       <section className="glass-panel search-container">
