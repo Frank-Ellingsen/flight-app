@@ -1,17 +1,16 @@
 "use client";
 
 import React, { useState, FormEvent } from "react";
+import Image from "next/image";
 import { 
   Search, 
   Plane, 
   Calendar, 
-  Clock, 
   MapPin, 
   AlertCircle, 
   Globe, 
   Compass, 
-  Info,
-  ArrowRight
+  Info
 } from "lucide-react";
 import { Flight } from "@/data/mockFlights";
 
@@ -46,14 +45,16 @@ export default function Home() {
       }
       
       setFlights(data.flights || []);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.message || "An unexpected error occurred.");
+      const message = err instanceof Error ? err.message : "An unexpected error occurred.";
+      setError(message);
       setFlights([]);
     } finally {
       setLoading(false);
     }
   };
+
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -89,7 +90,7 @@ export default function Home() {
     <div className="app-container">
       {/* Hero Header Section */}
       <header className="hero">
-        <img src="/logo.png" alt="Flights-Tracker Norway Logo" className="hero-logo" />
+        <Image src="/logo.png" alt="Flights-Tracker Norway Logo" width={120} height={120} className="hero-logo" />
         <p className="hero-subtitle" style={{ marginTop: "0.5rem" }}>
           Track departures, arrivals, timezones, and real-time schedules for all flights traveling to or from Norway.
         </p>
@@ -342,7 +343,7 @@ export default function Home() {
             </div>
             <h3 className="empty-title">No matching flights found</h3>
             <p className="empty-message">
-              We couldn't find any flights matching <strong>"{searchQuery}"</strong>. 
+              We couldn&apos;t find any flights matching <strong>&quot;{searchQuery}&quot;</strong>. 
               Norway Flight Board only records flights to and from Norway.
             </p>
             <div style={{ marginTop: 8, fontSize: "0.85rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: 6 }}>

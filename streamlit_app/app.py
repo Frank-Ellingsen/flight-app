@@ -1,5 +1,15 @@
+import os
 import streamlit as st
 import pandas as pd
+
+# Try to load .env if python-dotenv is available
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
+import requests
 
 # Mock flights data (converted from the project's TypeScript mockFlights)
 mock_flights = [
@@ -15,16 +25,18 @@ mock_flights = [
 def flatten_flights(flights):
     rows = []
     for f in flights:
+        dep = f.get("departure", {})
+        arr = f.get("arrival", {})
         row = {
             "flightNumber": f.get("flightNumber"),
             "airline": f.get("airline"),
             "airlineCode": f.get("airlineCode"),
-            "departure_code": f["departure"].get("code"),
-            "departure_city": f["departure"].get("city"),
-            "departure_time": f["departure"].get("time"),
-            "arrival_code": f["arrival"].get("code"),
-            "arrival_city": f["arrival"].get("city"),
-            "arrival_time": f["arrival"].get("time"),
+            "departure_code": dep.get("code"),
+            "departure_city": dep.get("city"),
+            "departure_time": dep.get("time"),
+            "arrival_code": arr.get("code"),
+            "arrival_city": arr.get("city"),
+            "arrival_time": arr.get("time"),
             "duration": f.get("duration"),
             "status": f.get("status"),
             "aircraft": f.get("aircraft"),
@@ -35,23 +47,137 @@ def flatten_flights(flights):
     return rows
 
 
-st.set_page_config(page_title="Flight Viewer", layout="wide")
-st.title("Flight Viewer (Streamlit)")
-st.write("A simple viewer for the mock flight data included in this repo.")
+st.set_page_config(page_title="Norway Flight Board", layout="wide")
+st.title("🇳🇴 Norway Flight Board")
 
-# Data
-df = pd.DataFrame(flatten_flights(mock_flights))
+# Determine AVIATION API key
+AVIATION_API_KEY = os.environ.get('AVIATION_API_KEY')
+if not AVIATION_API_KEY:
+    st.sidebar.warning('AVIATION_API_KEY not found in environment; falling back to mock data.')
+
+# Helper to call Aviationstack
+def fetch_aviationstack(query):
+    """Simple fetch wrapper. Query may be flight number, single IATA or origin-destination like KRS-OSL."""
+    if not AVIATION_API_KEY:
+        return None
+    q = query.strip()
+    
+    # Simple mapping for city names
+    CITY_TO_IATA = {
+        "KRISTIANSAND": "KRS", "OSLO": "OSL", "BERGEN": "BGO", 
+        "TRONDHEIM": "TRD", "TROMSO": "TOS", "STAVANGER": "SVG", 
+        "SANDEFJORD": "TRF", "BODO": "BOO", "ALTA": "ALF", "ALESUND": "AES"
+    }
+
+    # origin-destination
+    parts = [p.strip().upper() for p in q.replace('\u2192','-').replace(' to ', '-').split('-') if p.strip()]
+    params = {'access_key': AVIATION_API_KEY, 'limit': 50}
+    
+    if len(parts) == 2:
+        a, b = parts
+        params['dep_iata'] = a if len(a) == 3 else CITY_TO_IATA.get(a)
+        params['arr_iata'] = b if len(b) == 3 else CITY_TO_IATA.get(b)
+        if not params.get('dep_iata') or not params.get('arr_iata'):
+            return None
+    else:
+        norm = q.replace(' ', '').upper()
+        if norm.isalpha() and len(norm) == 3:
+            params['dep_iata'] = norm
+        elif any(ch.isdigit() for ch in norm):
+            params['flight_iata'] = norm
+        else:
+            return None
+
+    try:
+        resp = requests.get('http://api.aviationstack.com/v1/flights', params=params, timeout=10)
+        if resp.status_code != 200:
+            st.sidebar.error(f'API error: {resp.status_code}')
+            return None
+        data = resp.json().get('data', [])
+        return data
+    except Exception as e:
+        st.sidebar.error(f'Failed to call Aviationstack: {e}')
+        return None
+
+
+st.write("Real-time flight schedules for Norway. Connects to Aviationstack API.")
+
+use_real = st.sidebar.checkbox('Use real API (Aviationstack)', value=bool(AVIATION_API_KEY))
+
+# Data source selection
+source_flights = mock_flights
+
+# If using real API and search/filter provided, attempt to fetch
+query_input = st.sidebar.text_input("Search flight number, city or route (e.g. OSL-BGO)")
+if use_real and query_input:
+    with st.spinner('Fetching real-time data...'):
+        api_data = fetch_aviationstack(query_input)
+        if api_data:
+            # Map Aviationstack fields to our internal structure
+            mapped = []
+            for av in api_data:
+                dep = av.get('departure', {})
+                arr = av.get('arrival', {})
+                flight_info = av.get('flight', {})
+                
+                # Simple duration calculation
+                duration = "N/A"
+                try:
+                    if dep.get('scheduled') and arr.get('scheduled'):
+                        from datetime import datetime
+                        d1 = datetime.fromisoformat(dep['scheduled'].replace('Z', '+00:00'))
+                        d2 = datetime.fromisoformat(arr['scheduled'].replace('Z', '+00:00'))
+                        diff = d2 - d1
+                        minutes = int(diff.total_seconds() / 60)
+                        if minutes > 0:
+                            h = minutes // 60
+                            m = minutes % 60
+                            duration = f"{h}h {m}m" if h > 0 else f"{m}m"
+                except:
+                    pass
+
+                mapped.append({
+                    'flightNumber': flight_info.get('iata') or flight_info.get('number') or 'N/A',
+                    'airline': av.get('airline', {}).get('name', 'Unknown'),
+                    'airlineCode': av.get('airline', {}).get('iata', 'N/A'),
+                    'departure': {
+                        'code': dep.get('iata','N/A'), 
+                        'city': dep.get('airport','').replace(' Airport', ''),
+                        'time': dep.get('scheduled', ''),
+                        'timezone': dep.get('timezone', 'UTC')
+                    },
+                    'arrival': {
+                        'code': arr.get('iata','N/A'), 
+                        'city': arr.get('airport','').replace(' Airport', ''),
+                        'time': arr.get('scheduled', ''),
+                        'timezone': arr.get('timezone', 'UTC')
+                    },
+                    'duration': duration,
+                    'status': av.get('flight_status','Scheduled').capitalize(),
+                    'aircraft': av.get('aircraft', {}).get('registration','Boeing 737'),
+                    'gate': dep.get('gate'),
+                    'terminal': dep.get('terminal')
+                })
+            if mapped:
+                source_flights = mapped
+            else:
+                st.sidebar.info('No flights found for this query.')
+        elif query_input:
+            st.sidebar.info('No data returned from API; showing mock results.')
+
+# Build dataframe
+df = pd.DataFrame(flatten_flights(source_flights))
 
 # Sidebar filters
 st.sidebar.header("Filters")
-all_departures = ["All"] + sorted(df["departure_city"].unique().tolist())
-all_arrivals = ["All"] + sorted(df["arrival_city"].unique().tolist())
-all_status = ["All"] + sorted(df["status"].unique().tolist())
+all_departures = ["All"] + sorted([x for x in df["departure_city"].unique().tolist() if x])
+all_arrivals = ["All"] + sorted([x for x in df["arrival_city"].unique().tolist() if x])
+all_status = ["All"] + sorted([x for x in df["status"].unique().tolist() if x])
 
 dep = st.sidebar.selectbox("Departure city", all_departures, index=0)
 arr = st.sidebar.selectbox("Arrival city", all_arrivals, index=0)
 stat = st.sidebar.selectbox("Status", all_status, index=0)
-search = st.sidebar.text_input("Search flight number or airline")
+search = st.sidebar.text_input("Filter table (airline/flight)")
 
 filtered = df.copy()
 if dep != "All":
@@ -63,36 +189,43 @@ if stat != "All":
 if search:
     s = search.lower()
     filtered = filtered[
-        filtered["flightNumber"].str.lower().str.contains(s)
-        | filtered["airline"].str.lower().str.contains(s)
+        filtered["flightNumber"].str.lower().str.contains(s, na=False)
+        | filtered["airline"].str.lower().str.contains(s, na=False)
     ]
 
-st.sidebar.markdown(f"**{len(filtered)}** flights matching")
+st.sidebar.markdown(f"**{len(filtered)}** flights matching filters")
 
 # Main table
-st.dataframe(filtered.reset_index(drop=True))
+st.dataframe(filtered.reset_index(drop=True), use_container_width=True)
 
 # Detailed view for selected flight
 sel = st.selectbox("Select flight for details", ["None"] + filtered["flightNumber"].tolist())
 if sel and sel != "None":
-    flight = next((f for f in mock_flights if f["flightNumber"] == sel), None)
+    flight = next((f for f in source_flights if f.get("flightNumber") == sel), None)
     if flight:
-        st.header(f"{flight['flightNumber']} — {flight['airline']}")
-        col1, col2 = st.columns(2)
+        st.header(f"{flight.get('flightNumber')} — {flight.get('airline')}")
+        col1, col2, col3 = st.columns(3)
         with col1:
-            st.subheader("Departure")
-            st.write(flight["departure"]["city"]) 
-            st.write(f"{flight['departure']['city']} ({flight['departure']['code']})")
-            st.write(f"Time: {flight['departure']['time']} ({flight['departure']['timezone']})")
-            st.write(f"Gate: {flight.get('gate', '-')}")
-            st.write(f"Terminal: {flight.get('terminal', '-')}")
+            st.subheader("🛫 Departure")
+            d = flight['departure']
+            st.write(f"**City:** {d.get('city')}")
+            st.write(f"**Airport:** {d.get('code')}")
+            st.write(f"**Time:** {d.get('time', '-') }")
+            st.write(f"**Gate:** {flight.get('gate') or '-'}")
+            st.write(f"**Terminal:** {flight.get('terminal') or '-'}")
         with col2:
-            st.subheader("Arrival")
-            st.write(flight["arrival"]["city"]) 
-            st.write(f"{flight['arrival']['city']} ({flight['arrival']['code']})")
-            st.write(f"Time: {flight['arrival']['time']} ({flight['arrival']['timezone']})")
-            st.write(f"Duration: {flight.get('duration')}")
-            st.write(f"Aircraft: {flight.get('aircraft')}")
+            st.subheader("🛬 Arrival")
+            a = flight['arrival']
+            st.write(f"**City:** {a.get('city')}")
+            st.write(f"**Airport:** {a.get('code')}")
+            st.write(f"**Time:** {a.get('time', '-') }")
+            st.write(f"**Duration:** {flight.get('duration')}")
+        with col3:
+            st.subheader("ℹ️ Flight Info")
+            st.write(f"**Status:** {flight.get('status')}")
+            st.write(f"**Aircraft:** {flight.get('aircraft')}")
+            st.write(f"**Airline Code:** {flight.get('airlineCode')}")
+
 
 st.markdown("---")
 st.write("Deploy to Streamlit Cloud: create a new app, pick this repo, and set the app path to streamlit_app/app.py.")
